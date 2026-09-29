@@ -4,6 +4,7 @@ const config = require('./config/env');
 const healthRouter = require('./routes/health');
 const webhookRouter = require('./routes/webhook');
 const apiRouter = require('./routes/api');
+const { modelDiscoveryService } = require('./services/modelDiscovery');
 
 const app = express();
 
@@ -45,6 +46,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] Environment: ${config.env}`);
   console.log(`[Server] Webhook URL: http://0.0.0.0:${PORT}/webhook`);
   console.log(`[Server] Health Check: http://0.0.0.0:${PORT}/health`);
+
+  // Start monthly scheduled AI model health scanner & boot auto-fix
+  modelDiscoveryService.startMonthlyAutoScanSchedule();
 });
 
 // Graceful shutdown

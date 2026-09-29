@@ -219,6 +219,14 @@ class ProviderManager {
           comment_id: input.comment_id,
           details: { isTransient: err.isTransient, model: config.geminiModel }
         }).catch(() => {});
+
+        // If model is deprecated / not found (404), trigger background auto-switch to latest working model
+        if (err.status === 404 || /no longer available|not found/i.test(err.message)) {
+          try {
+            const { modelDiscoveryService } = require('../services/modelDiscovery');
+            modelDiscoveryService.autoUpdateToBestModel().catch(console.error);
+          } catch (_) {}
+        }
       }
     } else {
       console.warn('[AI CircuitBreaker] Gemini circuit is OPEN, skipping to Hugging Face');

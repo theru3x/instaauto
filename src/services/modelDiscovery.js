@@ -190,9 +190,11 @@ class ModelDiscoveryService {
 
   /**
    * Automatically check and update active model in configuration if current model is deprecated / failing
+   * or switch to the newest verified working model.
+   * @param {boolean} [forceToBest=false] - If true, switches to top working model even if current is working
    * @returns {Promise<{ updated: boolean, previousModel: string, newModel: string, reason: string }>}
    */
-  async autoUpdateToBestModel() {
+  async autoUpdateToBestModel(forceToBest = false) {
     const current = config.geminiModel;
     if (!config.geminiApiKey) {
       return { updated: false, previousModel: current, newModel: current, reason: 'No Gemini API key set' };
@@ -201,42 +203,89 @@ class ModelDiscoveryService {
     // Probe current model
     const currentCheck = await this.probeGeminiModel(current, config.geminiApiKey);
 
-    if (currentCheck.working) {
+    if (currentCheck.working && !forceToBest) {
       return { updated: false, previousModel: current, newModel: current, reason: 'Current model is active and healthy' };
     }
 
-    // Current model is failing / deprecated -> discover working model
-    console.warn(`[Model Discovery] Current model "${current}" failed health probe (${currentCheck.error}). Auto-discovering replacement...`);
-    await errorTracker.logError({
-      type: 'MODEL_DEPRECATION',
-      message: `Model "${current}" is failing or deprecated: ${currentCheck.error}. Auto-switching to working model.`,
-      provider: 'Gemini',
-      statusCode: 404
-    });
+    if (!currentCheck.working) {
+      console.warn(`[Model Discovery] Current model "${current}" failed probe (${currentCheck.error}). Auto-discovering replacement...`);
+      await errorTracker.logError({
+        type: 'MODEL_DEPRECATION',
+        message: `Model "${current}" is failing or deprecated: ${currentCheck.error}. Auto-switching to working model.`,
+        provider: 'Gemini',
+        statusCode: 404
+      }).catch(() => {});
+    }
 
     const discovery = await this.discoverModels();
     const working = discovery.geminiModels.find(m => m.working);
 
     if (working) {
       const newModel = working.model;
-      config.geminiModel = newModel;
-      try {
-        const { providerManager } = require('../ai/ProviderManager');
-        if (providerManager && providerManager.geminiProvider) {
-          providerManager.geminiProvider.model = newModel;
-        }
-      } catch (_) {}
-      await db.updateConfig({ geminiModel: newModel });
-      console.log(`[Model Discovery] Successfully auto-updated model from "${current}" to "${newModel}"`);
-      return {
-        updated: true,
-        previousModel: current,
-        newModel,
-        reason: `Auto-switched from deprecated/failing "${current}" to verified working model "${newModel}" (${working.latencyMs}ms)`
-      };
+      if (newModel !== current || !currentCheck.working) {
+        config.geminiModel = newModel;
+        try {
+          const { providerManager } = require('../ai/ProviderManager');
+          if (providerManager && providerManager.geminiProvider) {
+            providerManager.geminiProvider.model = newModel;
+          }
+        } catch (_) {}
+        await db.updateConfig({ geminiModel: newModel });
+        console.log(`[Model Discovery] Successfully auto-switched to latest working model: "${newModel}" (${working.latencyMs}ms)`);
+        return {
+          updated: true,
+          previousModel: current,
+          newModel,
+          reason: `Auto-switched from "${current}" to latest verified working model "${newModel}" (${working.latencyMs}ms)`
+        };
+      }
+      return { updated: false, previousModel: current, newModel: current, reason: 'Already on the best working model' };
     }
 
     return { updated: false, previousModel: current, newModel: current, reason: 'No working Gemini model could be verified' };
+  }
+
+  /**
+   * Start monthly scheduled auto-scan (every 30 days) and initial boot-time scan
+   */
+  startMonthlyAutoScanSchedule() {
+    // 30 days in milliseconds: 30 * 24 * 60 * 60 * 1000 = 2,592,000,000 ms
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+    console.log('[Model Discovery Scheduler] Initializing monthly model auto-discovery scheduler (every 30 days)...');
+
+    // Run initial scan 5 seconds after server boot
+    setTimeout(async () => {
+      try {
+        console.log('[Model Discovery Scheduler] Running boot-time model discovery scan...');
+        const res = await this.autoUpdateToBestModel();
+        if (res.updated) {
+          console.log(`[Model Discovery Scheduler] Boot auto-update complete: Switched to "${res.newModel}"`);
+        }
+      } catch (err) {
+        console.warn('[Model Discovery Scheduler] Boot-time model scan error:', err.message);
+      }
+    }, 5000);
+
+    // Schedule monthly recurring auto-scan
+    const timer = setInterval(async () => {
+      try {
+        console.log('[Model Discovery Scheduler] Executing monthly scheduled model health scan...');
+        const res = await this.autoUpdateToBestModel();
+        if (res.updated) {
+          console.log(`[Model Discovery Scheduler] Monthly auto-update complete: Switched to "${res.newModel}"`);
+        } else {
+          console.log(`[Model Discovery Scheduler] Monthly scan complete: Model is healthy (${config.geminiModel})`);
+        }
+      } catch (err) {
+        console.warn('[Model Discovery Scheduler] Monthly scan error:', err.message);
+      }
+    }, THIRTY_DAYS_MS);
+
+    // Do not prevent Node process from closing if it needs to exit
+    if (timer.unref) {
+      timer.unref();
+    }
   }
 }
 
