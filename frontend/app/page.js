@@ -885,14 +885,68 @@ export default function Dashboard() {
                   </p>
                 </div>
 
-                <button
-                  onClick={runModelAutoCheck}
-                  disabled={probingModels}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl glow-button text-white text-sm font-semibold"
-                >
-                  <RefreshCw className={`w-4 h-4 ${probingModels ? 'animate-spin' : ''}`} />
-                  <span>{probingModels ? 'Scanning Models...' : 'Run Auto-Discovery Scan'}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => runModelAutoCheck(apiUrl)}
+                    disabled={probingModels}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl glow-button text-white text-sm font-semibold"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${probingModels ? 'animate-spin' : ''}`} />
+                    <span>{probingModels ? 'Scanning...' : 'Run Discovery Scan'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Auto-Update Notification Banner */}
+              {autoUpdateAlert && (
+                <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-purple-950/60 to-indigo-950/60 border border-purple-500/40 shadow-lg flex items-start gap-3">
+                  <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-sm font-bold text-white">
+                      AI Model Auto-Updated Successfully
+                    </div>
+                    <div className="text-xs text-purple-200 mt-1 leading-relaxed">
+                      {autoUpdateAlert.reason || `Automatically switched to active model: ${autoUpdateAlert.newModel}`}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setAutoUpdateAlert(null)}
+                    className="text-xs text-purple-400 hover:text-white px-2 py-1"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Quick Model Switcher / Custom Model Input */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 mb-6 space-y-3">
+                <div className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Quick Model Select / Custom Gemini Model Name:</span>
+                  <span className="text-slate-500 font-mono text-[11px]">e.g. gemini-3.8-flash, gemini-2.5-flash</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'gemini-3.8-flash',
+                    'gemini-2.5-flash',
+                    'gemini-2.5-pro',
+                    'gemini-2.0-flash-exp',
+                    'gemini-1.5-flash-8b',
+                    'gemini-1.5-flash'
+                  ].map((modelName) => (
+                    <button
+                      key={modelName}
+                      type="button"
+                      onClick={() => handleSelectModel(modelName, null)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition ${
+                        config.geminiModel === modelName
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {modelName} {config.geminiModel === modelName && '✓'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Current Active Models Card */}
@@ -902,7 +956,7 @@ export default function Dashboard() {
                     <span className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Primary Model (Gemini)</span>
                     <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>
                   </div>
-                  <div className="text-lg font-bold text-white font-mono">{config.geminiModel || 'gemini-2.0-flash'}</div>
+                  <div className="text-lg font-bold text-white font-mono">{config.geminiModel || 'gemini-3.8-flash'}</div>
                   <div className="text-xs text-slate-400 mt-1">Recommended for sub-second generation & JSON structured output.</div>
                 </div>
 

@@ -5,15 +5,17 @@ const { errorTracker } = require('./errorTracker');
 class ModelDiscoveryService {
   constructor(options = {}) {
     this.fetchFn = options.fetchFn || globalThis.fetch;
-    // Default candidate models to test probe in order of preference
+    // Default candidate models in order of priority
     this.geminiCandidates = [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-3.8-flash',
+      'gemini-2.0-flash-exp',
+      'gemini-2.0-pro-exp-02-05',
       'gemini-2.0-flash',
-      'gemini-2.0-flash-lite-preview-02-05',
-      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash-8b',
       'gemini-1.5-flash',
-      'gemini-1.5-pro-latest',
-      'gemini-1.5-pro',
-      'gemini-pro'
+      'gemini-1.5-pro'
     ];
 
     this.hfCandidates = [
@@ -29,20 +31,20 @@ class ModelDiscoveryService {
    * Probe a specific Gemini model to test if it is active and working
    * @param {string} modelName
    * @param {string} apiKey
-   * @returns {Promise<{ model: string, working: boolean, latencyMs: number, error?: string }>}
+   * @returns {Promise<{ model: string, working: boolean, latencyMs: number, error?: string, suggestedModel?: string }>}
    */
   async probeGeminiModel(modelName, apiKey) {
     if (!apiKey) {
       return { model: modelName, working: false, latencyMs: 0, error: 'GEMINI_API_KEY is not set' };
     }
 
-    const cleanModel = modelName.replace(/^models\//, '');
+    const cleanModel = modelName.replace(/^models\//, '').trim();
     const startTime = Date.now();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
+      const timer = setTimeout(() => controller.abort(), 8000);
 
       const res = await this.fetchFn(url, {
         method: 'POST',
@@ -69,7 +71,20 @@ class ModelDiscoveryService {
         errText = await res.text().catch(() => 'Request failed');
       }
 
-      return { model: cleanModel, working: false, latencyMs, error: `HTTP ${res.status}: ${errText}` };
+      // Check if Google's error response suggests a specific newer model
+      let suggestedModel = null;
+      const suggestMatch = errText.match(/models\/([a-zA-Z0-9.\-_]+)/i);
+      if (suggestMatch && suggestMatch[1] && suggestMatch[1] !== cleanModel) {
+        suggestedModel = suggestMatch[1];
+      }
+
+      return {
+        model: cleanModel,
+        working: false,
+        latencyMs,
+        error: `HTTP ${res.status}: ${errText}`,
+        suggestedModel
+      };
     } catch (err) {
       return { model: cleanModel, working: false, latencyMs: Date.now() - startTime, error: err.message };
     }
@@ -82,20 +97,25 @@ class ModelDiscoveryService {
    */
   async listAvailableGeminiModels(apiKey) {
     if (!apiKey) return [];
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-      const res = await this.fetchFn(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      if (Array.isArray(data.models)) {
-        return data.models
-          .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
-          .map(m => m.name.replace(/^models\//, ''));
-      }
-      return [];
-    } catch (_) {
-      return [];
+    const endpoints = [
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const res = await this.fetchFn(url);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          const usable = data.models
+            .filter(m => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent'))
+            .map(m => m.name.replace(/^models\//, ''));
+          if (usable.length > 0) return usable;
+        }
+      } catch (_) {}
     }
+    return [];
   }
 
   /**
@@ -107,22 +127,40 @@ class ModelDiscoveryService {
     const geminiKey = options.geminiApiKey || config.geminiApiKey;
     const hfToken = options.hfToken || config.hfToken;
 
-    // 1. Fetch official list from Gemini API if possible
-    let candidateList = [...this.geminiCandidates];
+    // 1. Fetch live models directly from Google's Gemini API
+    let candidateList = [];
     if (geminiKey) {
       const liveModels = await this.listAvailableGeminiModels(geminiKey);
       if (liveModels.length > 0) {
-        // Merge with priority on 2.0 / 1.5 flash
-        const prioritized = liveModels.filter(m => /flash/i.test(m) || /pro/i.test(m));
-        candidateList = Array.from(new Set([...this.geminiCandidates, ...prioritized]));
+        // Sort live models putting flash/pro first
+        const flashModels = liveModels.filter(m => /flash/i.test(m));
+        const proModels = liveModels.filter(m => /pro/i.test(m) && !/flash/i.test(m));
+        const otherModels = liveModels.filter(m => !/flash|pro/i.test(m));
+        candidateList = [...flashModels, ...proModels, ...otherModels];
       }
     }
 
-    // 2. Probe top Gemini candidates (probe top 5 in parallel to be fast)
-    const probeTargets = candidateList.slice(0, 6);
-    const geminiResults = await Promise.all(
+    // Merge default candidates
+    candidateList = Array.from(new Set([...candidateList, ...this.geminiCandidates]));
+
+    // Always include currently configured model
+    if (config.geminiModel && !candidateList.includes(config.geminiModel)) {
+      candidateList.unshift(config.geminiModel);
+    }
+
+    // 2. Probe top Gemini candidates (probe up to 8 in parallel)
+    let probeTargets = candidateList.slice(0, 8);
+    let geminiResults = await Promise.all(
       probeTargets.map(m => this.probeGeminiModel(m, geminiKey))
     );
+
+    // If any probe suggested a newer model (e.g. from 404 message), probe it too if not tested
+    for (const res of geminiResults) {
+      if (res.suggestedModel && !geminiResults.some(r => r.model === res.suggestedModel)) {
+        const suggestedProbe = await this.probeGeminiModel(res.suggestedModel, geminiKey);
+        geminiResults.unshift(suggestedProbe);
+      }
+    }
 
     // Pick best working Gemini model
     const workingGemini = geminiResults.filter(r => r.working);
@@ -182,6 +220,12 @@ class ModelDiscoveryService {
     if (working) {
       const newModel = working.model;
       config.geminiModel = newModel;
+      try {
+        const { providerManager } = require('../ai/ProviderManager');
+        if (providerManager && providerManager.geminiProvider) {
+          providerManager.geminiProvider.model = newModel;
+        }
+      } catch (_) {}
       await db.updateConfig({ geminiModel: newModel });
       console.log(`[Model Discovery] Successfully auto-updated model from "${current}" to "${newModel}"`);
       return {
