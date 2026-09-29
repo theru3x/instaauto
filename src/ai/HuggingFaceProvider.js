@@ -47,35 +47,36 @@ Rules:
 
     const userPrompt = `Comment: "${input.comment_text}". Output JSON:`;
 
-    // Modern Hugging Face Inference Router endpoint (OpenAI compatible)
-    const endpoints = [
-      'https://router.huggingface.co/hf-inference/v1/chat/completions',
-      `https://api-inference.huggingface.co/models/${this.model}/v1/chat/completions`,
-      `https://api-inference.huggingface.co/models/${this.model}`
-    ];
-    const url = endpoints[0];
-    const payload = {
-      model: this.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.1,
-      max_tokens: 250,
-      response_format: { type: 'json_object' }
-    };
+    // Fallback models supported by Hugging Face Serverless Router
+    const modelCandidates = Array.from(new Set([
+      this.model,
+      'Qwen/Qwen2.5-7B-Instruct',
+      'mistralai/Mistral-7B-Instruct-v0.3',
+      'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B',
+      'meta-llama/Llama-3.2-3B-Instruct'
+    ]));
 
     let attempt = 0;
     let lastError = null;
 
-    while (attempt <= this.maxRetries) {
+    for (const modelToTry of modelCandidates) {
+      const url = 'https://router.huggingface.co/hf-inference/v1/chat/completions';
+      const payload = {
+        model: modelToTry,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 250,
+        response_format: { type: 'json_object' }
+      };
+
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
-        const headers = {
-          'Content-Type': 'application/json'
-        };
+        const headers = { 'Content-Type': 'application/json' };
         if (this.token) {
           headers['Authorization'] = `Bearer ${this.token}`;
         }
@@ -96,30 +97,24 @@ Rules:
             errBody = await response.text();
           } catch (_) {}
 
-          if (this.isPermanentError(status)) {
-            const permErr = new Error(`HuggingFace permanent error ${status}: ${errBody}`);
-            permErr.status = status;
-            permErr.isTransient = false;
-            throw permErr;
+          // If model is not supported by provider on HF router, try next model candidate
+          if (status === 400 && /not supported/i.test(errBody)) {
+            console.warn(`[HuggingFace] Model "${modelToTry}" not supported on router, trying fallback model...`);
+            continue;
           }
 
           if (this.isTransientError(status, errBody)) {
-            const transErr = new Error(`HuggingFace transient error ${status}: ${errBody}`);
-            transErr.status = status;
-            transErr.isTransient = true;
-
             if (attempt < this.maxRetries) {
               const backoff = this.calculateBackoff(attempt);
               attempt++;
               await this.sleep(backoff);
               continue;
             }
-            throw transErr;
           }
 
           const err = new Error(`HuggingFace error ${status}: ${errBody}`);
           err.status = status;
-          err.isTransient = false;
+          err.isTransient = this.isTransientError(status, errBody);
           throw err;
         }
 
@@ -147,30 +142,21 @@ Rules:
           intent: validation.data.intent,
           reply: validation.data.reply,
           safe: validation.data.safe,
-          provider: this.name,
+          provider: `${this.name}:${modelToTry}`,
           latencyMs,
           raw: data
         };
 
       } catch (err) {
         lastError = err;
-        if (err.name === 'AbortError' || /timeout/i.test(err.message)) {
-          err.isTransient = true;
-          err.status = 408;
-        }
-
-        if (err.isTransient && attempt < this.maxRetries) {
-          const backoff = this.calculateBackoff(attempt);
-          attempt++;
-          await this.sleep(backoff);
+        // If error is 400 not supported, loop will continue to next candidate
+        if (err.status === 400 && /not supported/i.test(err.message)) {
           continue;
         }
-
-        throw lastError;
       }
     }
 
-    throw lastError || new Error('HuggingFaceProvider failed after max retries');
+    throw lastError || new Error('HuggingFaceProvider failed to find supported working model');
   }
 }
 

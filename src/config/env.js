@@ -10,7 +10,7 @@ const config = {
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   
   hfToken: process.env.HF_TOKEN || '',
-  hfModel: process.env.HF_MODEL || 'meta-llama/Llama-3.2-3B-Instruct',
+  hfModel: process.env.HF_MODEL || 'Qwen/Qwen2.5-7B-Instruct',
   
   // Instagram / Meta credentials
   instagramAccessToken: process.env.INSTAGRAM_ACCESS_TOKEN || '',

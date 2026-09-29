@@ -85,7 +85,7 @@ export default function Dashboard() {
 
   const [config, setConfig] = useState({
     geminiModel: 'gemini-3.8-flash',
-    hfModel: 'meta-llama/Llama-3.2-3B-Instruct',
+    hfModel: 'Qwen/Qwen2.5-7B-Instruct',
     fallbackMessage: 'Hey 👋 Thanks for your comment! You can find the requested information here: https://theru3x.com/links',
     allowedUrl: 'https://theru3x.com/links',
     businessDescription: '',
