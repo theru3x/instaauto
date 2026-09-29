@@ -61,18 +61,21 @@ class InstagramService {
       return { success: true, simulated: true, commentId };
     }
 
+    const isIgToken = (this.accessToken || '').startsWith('IGA');
+    const apiHost = isIgToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com';
+
     let url;
     let payload;
 
     if (this.publicReply) {
       // Public reply to the comment: POST /{comment-id}/replies
-      url = `https://graph.facebook.com/${this.graphApiVersion}/${encodeURIComponent(commentId)}/replies`;
+      url = `${apiHost}/${this.graphApiVersion}/${encodeURIComponent(commentId)}/replies`;
       payload = {
         message: messageText
       };
     } else {
-      // Private reply via Direct Message: POST /v21.0/me/messages with recipient { comment_id }
-      url = `https://graph.facebook.com/${this.graphApiVersion}/me/messages`;
+      // Private reply via Direct Message: POST /me/messages with recipient { comment_id }
+      url = `${apiHost}/${this.graphApiVersion}/me/messages`;
       payload = {
         recipient: {
           comment_id: commentId
