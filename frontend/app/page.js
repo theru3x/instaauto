@@ -84,7 +84,7 @@ export default function Dashboard() {
   const [probingModels, setProbingModels] = useState(false);
 
   const [config, setConfig] = useState({
-    geminiModel: 'gemini-2.0-flash',
+    geminiModel: 'gemini-3.8-flash',
     hfModel: 'meta-llama/Llama-3.2-3B-Instruct',
     fallbackMessage: 'Hey 👋 Thanks for your comment! You can find the requested information here: https://theru3x.com/links',
     allowedUrl: 'https://theru3x.com/links',

@@ -7,7 +7,7 @@ const config = {
   
   // AI Keys & Models
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   
   hfToken: process.env.HF_TOKEN || '',
   hfModel: process.env.HF_MODEL || 'meta-llama/Llama-3.2-3B-Instruct',
