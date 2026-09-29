@@ -37,27 +37,26 @@ app.get('/', (req, res) => {
   });
 });
 
-// Start server if executed directly
-if (require.main === module) {
-  const PORT = config.port;
-  const server = app.listen(PORT, () => {
-    console.log(`[Server] Instagram Automation Server listening on port ${PORT}`);
-    console.log(`[Server] Environment: ${config.env}`);
-    console.log(`[Server] Webhook URL: http://localhost:${PORT}/webhook`);
-    console.log(`[Server] Health Check: http://localhost:${PORT}/health`);
+const PORT = config.port;
+
+// Start server on 0.0.0.0 so cloud providers (Render, Railway, Fly, Docker) detect open port
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] Instagram Automation Server listening on port ${PORT}`);
+  console.log(`[Server] Environment: ${config.env}`);
+  console.log(`[Server] Webhook URL: http://0.0.0.0:${PORT}/webhook`);
+  console.log(`[Server] Health Check: http://0.0.0.0:${PORT}/health`);
+});
+
+// Graceful shutdown
+const shutdown = () => {
+  console.log('[Server] Gracefully shutting down...');
+  server.close(() => {
+    console.log('[Server] Closed all connections.');
+    process.exit(0);
   });
+};
 
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log('[Server] Gracefully shutting down...');
-    server.close(() => {
-      console.log('[Server] Closed all connections.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 module.exports = app;

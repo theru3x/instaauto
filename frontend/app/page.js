@@ -31,13 +31,31 @@ import {
   HelpCircle
 } from 'lucide-react';
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const DEFAULT_API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('logs'); // 'logs' | 'models' | 'errors' | 'rules' | 'playground' | 'settings'
   const [backendStatus, setBackendStatus] = useState('checking'); // 'healthy' | 'offline' | 'checking'
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState(null);
+
+  // Dynamic API URL state with localStorage persistence
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_BASE);
+  const [apiUrlInput, setApiUrlInput] = useState(DEFAULT_API_BASE);
+  const [isCheckingBackend, setIsCheckingBackend] = useState(false);
+  const [lastCheckError, setLastCheckError] = useState(null);
+
+  // Load saved API URL on initial mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('insta_api_url');
+      if (saved && saved.trim()) {
+        const cleaned = saved.trim().replace(/\/+$/, '');
+        setApiUrl(cleaned);
+        setApiUrlInput(cleaned);
+      }
+    }
+  }, []);
 
   // Metrics
   const [metrics, setMetrics] = useState({
@@ -127,11 +145,12 @@ export default function Dashboard() {
   };
 
   // 1. Auto-discover and verify models on dashboard load
-  const runModelAutoCheck = async () => {
+  const runModelAutoCheck = async (targetBase = apiUrl) => {
+    const base = (targetBase || apiUrl).replace(/\/+$/, '');
     setProbingModels(true);
     try {
       // Auto-update if current model is failing
-      const updateRes = await fetch(`${API_BASE}/api/models/auto-update`, { method: 'POST' }).catch(() => null);
+      const updateRes = await fetch(`${base}/api/models/auto-update`, { method: 'POST' }).catch(() => null);
       if (updateRes && updateRes.ok) {
         const uData = await updateRes.json();
         if (uData.result && uData.result.updated) {
@@ -141,7 +160,7 @@ export default function Dashboard() {
       }
 
       // Discover all candidate models
-      const discRes = await fetch(`${API_BASE}/api/models/discover`).catch(() => null);
+      const discRes = await fetch(`${base}/api/models/discover`).catch(() => null);
       if (discRes && discRes.ok) {
         const dData = await discRes.json();
         if (dData.discovery) {
@@ -156,18 +175,28 @@ export default function Dashboard() {
   };
 
   // 2. Fetch all dashboard data
-  const fetchData = async () => {
+  const fetchData = async (targetBase = apiUrl) => {
+    const base = (targetBase || apiUrl).replace(/\/+$/, '');
+    setIsCheckingBackend(true);
     try {
       // Health check
-      const healthRes = await fetch(`${API_BASE}/health`).catch(() => null);
+      const healthRes = await fetch(`${base}/health`).catch(e => {
+        setLastCheckError(e.message || 'Connection failed');
+        return null;
+      });
+
       if (healthRes && healthRes.ok) {
         setBackendStatus('healthy');
+        setLastCheckError(null);
       } else {
         setBackendStatus('offline');
+        if (healthRes) {
+          setLastCheckError(`HTTP ${healthRes.status}: ${healthRes.statusText}`);
+        }
       }
 
       // Metrics & Circuit Breakers
-      const metricsRes = await fetch(`${API_BASE}/api/metrics`).catch(() => null);
+      const metricsRes = await fetch(`${base}/api/metrics`).catch(() => null);
       if (metricsRes && metricsRes.ok) {
         const mData = await metricsRes.json();
         if (mData.metrics) setMetrics(mData.metrics);
@@ -175,28 +204,28 @@ export default function Dashboard() {
       }
 
       // Jobs Logs
-      const jobsRes = await fetch(`${API_BASE}/api/jobs?limit=50`).catch(() => null);
+      const jobsRes = await fetch(`${base}/api/jobs?limit=50`).catch(() => null);
       if (jobsRes && jobsRes.ok) {
         const jData = await jobsRes.json();
         if (jData.jobs) setJobs(jData.jobs);
       }
 
       // Errors
-      const errorsRes = await fetch(`${API_BASE}/api/errors?limit=50`).catch(() => null);
+      const errorsRes = await fetch(`${base}/api/errors?limit=50`).catch(() => null);
       if (errorsRes && errorsRes.ok) {
         const eData = await errorsRes.json();
         if (eData.errors) setErrors(eData.errors);
       }
 
       // Rules
-      const rulesRes = await fetch(`${API_BASE}/api/rules`).catch(() => null);
+      const rulesRes = await fetch(`${base}/api/rules`).catch(() => null);
       if (rulesRes && rulesRes.ok) {
         const rData = await rulesRes.json();
         if (rData.rules) setRules(rData.rules);
       }
 
       // Config
-      const configRes = await fetch(`${API_BASE}/api/config`).catch(() => null);
+      const configRes = await fetch(`${base}/api/config`).catch(() => null);
       if (configRes && configRes.ok) {
         const cData = await configRes.json();
         if (cData.config) {
@@ -216,20 +245,52 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
+      setBackendStatus('offline');
+      setLastCheckError(err.message);
+    } finally {
+      setIsCheckingBackend(false);
     }
   };
 
+  const handleUpdateBackendUrl = (urlToSet) => {
+    let cleaned = (urlToSet || '').trim();
+    if (!cleaned) return;
+    cleaned = cleaned.replace(/\/+$/, '');
+    if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
+      cleaned = 'https://' + cleaned;
+    }
+    setApiUrl(cleaned);
+    setApiUrlInput(cleaned);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('insta_api_url', cleaned);
+    }
+    showToast(`Connecting to: ${cleaned}`, 'info');
+    fetchData(cleaned);
+    runModelAutoCheck(cleaned);
+  };
+
+  const handleResetBackendUrl = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('insta_api_url');
+    }
+    setApiUrl(DEFAULT_API_BASE);
+    setApiUrlInput(DEFAULT_API_BASE);
+    showToast(`Reset backend URL to default: ${DEFAULT_API_BASE}`, 'info');
+    fetchData(DEFAULT_API_BASE);
+    runModelAutoCheck(DEFAULT_API_BASE);
+  };
+
   useEffect(() => {
-    fetchData();
-    runModelAutoCheck();
-    const interval = setInterval(fetchData, 6000);
+    fetchData(apiUrl);
+    runModelAutoCheck(apiUrl);
+    const interval = setInterval(() => fetchData(apiUrl), 6000);
     return () => clearInterval(interval);
-  }, []);
+  }, [apiUrl]);
 
   // Handle Switch Model
   const handleSelectModel = async (geminiModel, hfModel) => {
     try {
-      const res = await fetch(`${API_BASE}/api/models/select`, {
+      const res = await fetch(`${apiUrl}/api/models/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ geminiModel, hfModel })
@@ -250,7 +311,7 @@ export default function Dashboard() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/config`, {
+      const res = await fetch(`${apiUrl}/api/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settingsForm)
@@ -273,7 +334,7 @@ export default function Dashboard() {
   // Clear Error Logs
   const handleClearErrors = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/errors`, { method: 'DELETE' });
+      const res = await fetch(`${apiUrl}/api/errors`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setErrors([]);
@@ -294,8 +355,8 @@ export default function Dashboard() {
 
     try {
       const url = editingRuleId
-        ? `${API_BASE}/api/rules/${editingRuleId}`
-        : `${API_BASE}/api/rules`;
+        ? `${apiUrl}/api/rules/${editingRuleId}`
+        : `${apiUrl}/api/rules`;
       const method = editingRuleId ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
@@ -330,7 +391,7 @@ export default function Dashboard() {
   const handleDeleteRule = async (id) => {
     if (!confirm('Are you sure you want to delete this rule?')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/rules/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${apiUrl}/api/rules/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast('Rule deleted');
@@ -344,7 +405,7 @@ export default function Dashboard() {
   // Toggle Rule Active
   const handleToggleRule = async (rule) => {
     try {
-      await fetch(`${API_BASE}/api/rules/${rule.id}`, {
+      await fetch(`${apiUrl}/api/rules/${rule.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !rule.is_active })
@@ -362,7 +423,7 @@ export default function Dashboard() {
     setSimulating(true);
     setSimResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/test-simulate`, {
+      const res = await fetch(`${apiUrl}/api/test-simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -386,7 +447,7 @@ export default function Dashboard() {
   // Reset Circuit Breakers
   const handleResetCircuitBreakers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/circuit-breaker/reset`, { method: 'POST' });
+      const res = await fetch(`${apiUrl}/api/circuit-breaker/reset`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast('Circuit breakers reset to CLOSED');
@@ -473,7 +534,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2.5">
             {/* Model Auto-check Pill */}
             <button
-              onClick={runModelAutoCheck}
+              onClick={() => runModelAutoCheck(apiUrl)}
               disabled={probingModels}
               className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 transition"
               title="Test & Auto-Discover working models"
@@ -498,17 +559,18 @@ export default function Dashboard() {
               backendStatus === 'healthy'
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 : 'bg-red-500/10 text-red-400 border-red-500/20'
-            }`}>
+            }`} title={`Connected to: ${apiUrl}`}>
               <span className={`w-2 h-2 rounded-full ${backendStatus === 'healthy' ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`}></span>
               Backend: {backendStatus === 'healthy' ? 'Online' : 'Offline'}
             </div>
 
             <button
-              onClick={fetchData}
+              onClick={() => fetchData(apiUrl)}
+              disabled={isCheckingBackend}
               title="Refresh Data"
-              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition disabled:opacity-50"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${isCheckingBackend ? 'animate-spin text-purple-400' : ''}`} />
             </button>
           </div>
         </div>
@@ -516,6 +578,59 @@ export default function Dashboard() {
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+
+        {/* Backend Offline / Connection Troubleshooting Banner */}
+        {backendStatus === 'offline' && (
+          <div className="mb-8 p-5 rounded-2xl bg-gradient-to-r from-red-950/40 via-slate-900 to-amber-950/30 border border-red-500/30 shadow-xl backdrop-blur-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Backend Connection Offline
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+                      Target: {apiUrl}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    {lastCheckError ? (
+                      <span className="text-rose-300 font-mono">Error: {lastCheckError}. </span>
+                    ) : null}
+                    If using <strong>Render Free Tier</strong>, the server sleeps after inactivity and may take ~50 seconds to spin up on first ping. If using a new backend URL, paste it below.
+                  </p>
+                </div>
+              </div>
+
+              {/* Instant URL Updater */}
+              <div className="flex flex-col sm:flex-row items-center gap-2 shrink-0">
+                <input
+                  type="text"
+                  placeholder="https://your-service.onrender.com"
+                  value={apiUrlInput}
+                  onChange={(e) => setApiUrlInput(e.target.value)}
+                  className="w-full sm:w-72 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
+                />
+                <button
+                  onClick={() => handleUpdateBackendUrl(apiUrlInput)}
+                  disabled={isCheckingBackend}
+                  className="w-full sm:w-auto px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md transition flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingBackend ? 'animate-spin' : ''}`} />
+                  <span>Connect</span>
+                </button>
+                {apiUrl !== DEFAULT_API_BASE && (
+                  <button
+                    onClick={handleResetBackendUrl}
+                    className="text-xs text-slate-400 hover:text-slate-200 underline px-1 py-1"
+                    title="Reset to default environment variable"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="flex items-center gap-2 p-1.5 rounded-2xl glass-panel mb-8 max-w-full overflow-x-auto">
@@ -1370,12 +1485,59 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveSettings} className="space-y-6">
-              {/* Section 1: AI Provider Keys & Models */}
-              <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800 space-y-4">
-                <h3 className="text-sm font-bold text-purple-400 flex items-center gap-2">
-                  <Bot className="w-4 h-4" /> 1. AI Providers (Primary & Failover Models)
-                </h3>
+            <div className="space-y-6">
+              {/* Section 0: Backend Server URL Connection */}
+              <div className="bg-slate-950/40 p-5 rounded-2xl border border-purple-500/30 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">
+                    <Radio className="w-4 h-4" /> Backend Server Endpoint URL
+                  </h3>
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    backendStatus === 'healthy' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${backendStatus === 'healthy' ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`}></span>
+                    {backendStatus === 'healthy' ? 'Connected & Online' : 'Offline / Unreachable'}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    placeholder="https://your-service.onrender.com or http://localhost:3000"
+                    value={apiUrlInput}
+                    onChange={(e) => setApiUrlInput(e.target.value)}
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm font-mono text-white focus:outline-none focus:border-purple-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateBackendUrl(apiUrlInput)}
+                    disabled={isCheckingBackend}
+                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-md transition flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingBackend ? 'animate-spin' : ''}`} />
+                    <span>Save & Reconnect</span>
+                  </button>
+                  {apiUrl !== DEFAULT_API_BASE && (
+                    <button
+                      type="button"
+                      onClick={handleResetBackendUrl}
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition shrink-0"
+                    >
+                      Reset Default
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400">
+                  Target: <span className="text-purple-300 font-mono">{apiUrl}</span> (Saved in browser storage). If you deploy frontend on Vercel, also set <code>NEXT_PUBLIC_API_URL</code> in Vercel Dashboard and redeploy.
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveSettings} className="space-y-6">
+                {/* Section 1: AI Provider Keys & Models */}
+                <div className="bg-slate-950/40 p-5 rounded-2xl border border-slate-800 space-y-4">
+                  <h3 className="text-sm font-bold text-purple-400 flex items-center gap-2">
+                    <Bot className="w-4 h-4" /> 1. AI Providers (Primary & Failover Models)
+                  </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -1572,6 +1734,7 @@ export default function Dashboard() {
               </div>
             </form>
           </div>
+        </div>
         )}
 
       </main>
