@@ -4,7 +4,7 @@ services:
     env: node
     plan: starter # Recommended starter plan for 24/7 background worker without spin-downs
     buildCommand: npm install
-    startCommand: node src/server.js
+    startCommand: node index.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:

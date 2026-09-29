@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node src/server.js",
-    "dev:backend": "node src/server.js",
+    "start": "node index.js",
+    "dev": "node index.js",
+    "dev:backend": "node index.js",
     "dev:frontend": "npm --prefix frontend run dev",
     "build:frontend": "npm --prefix frontend run build",
     "test": "jest --detectOpenHandles --forceExit"
