@@ -214,7 +214,7 @@ class Database {
 
   async createJob(job) {
     const jobRecord = {
-      job_id: job.job_id,
+      job_id: job.job_id || 'job_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
       comment_id: job.comment_id,
       commenter_id: job.commenter_id || '',
       comment_text: job.comment_text || '',
@@ -249,12 +249,12 @@ class Database {
   async updateJob(jobId, updates) {
     updates.updated_at = new Date().toISOString();
 
-    if (this.isConnected) {
+    if (this.isConnected && jobId) {
       try {
         const doc = await JobModel.findOneAndUpdate(
           { job_id: jobId },
           { $set: updates },
-          { new: true }
+          { returnDocument: 'after' }
         ).lean();
         if (doc) return doc;
       } catch (err) {
@@ -336,7 +336,7 @@ class Database {
         const doc = await RuleModel.findOneAndUpdate(
           { id },
           { $set: updates },
-          { new: true }
+          { returnDocument: 'after' }
         ).lean();
         if (doc) return doc;
       } catch (err) {
@@ -390,7 +390,7 @@ class Database {
         await ConfigModel.findOneAndUpdate(
           { key: 'app_settings' },
           { $set: { value: this.memoryData.config } },
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' }
         );
       } catch (err) {
         console.error('[DB] MongoDB updateConfig error:', err.message);
