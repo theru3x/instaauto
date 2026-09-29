@@ -78,11 +78,13 @@ class ModelDiscoveryService {
         suggestedModel = suggestMatch[1];
       }
 
+      const is429 = res.status === 429;
       return {
         model: cleanModel,
-        working: false,
+        working: is429 ? true : false, // 429 proves model exists on Google, but hit per-minute RPM quota
+        isRateLimited: is429,
         latencyMs,
-        error: `HTTP ${res.status}: ${errText}`,
+        error: is429 ? 'Quota Exceeded (Valid Model, cooling down)' : `HTTP ${res.status}: ${errText}`,
         suggestedModel
       };
     } catch (err) {
@@ -148,11 +150,15 @@ class ModelDiscoveryService {
       candidateList.unshift(config.geminiModel);
     }
 
-    // 2. Probe top Gemini candidates (probe up to 8 in parallel)
-    let probeTargets = candidateList.slice(0, 8);
-    let geminiResults = await Promise.all(
-      probeTargets.map(m => this.probeGeminiModel(m, geminiKey))
-    );
+    // 2. Probe top Gemini candidates sequentially with pacing to avoid RPM free tier rate limits
+    let probeTargets = candidateList.slice(0, 6);
+    let geminiResults = [];
+    for (const target of probeTargets) {
+      const probe = await this.probeGeminiModel(target, geminiKey);
+      geminiResults.push(probe);
+      // Small 250ms spacing between test probes
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
 
     // If any probe suggested a newer model (e.g. from 404 message), probe it too if not tested
     for (const res of geminiResults) {
