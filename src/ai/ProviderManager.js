@@ -220,8 +220,8 @@ class ProviderManager {
           details: { isTransient: err.isTransient, model: config.geminiModel }
         }).catch(() => {});
 
-        // If model is deprecated / not found (404), trigger background auto-switch to latest working model
-        if (err.status === 404 || /no longer available|not found/i.test(err.message)) {
+        // If model is rate-limited (429) or deprecated (404), trigger background auto-switch to another working model
+        if (err.status === 404 || err.status === 429 || /no longer available|not found|exceeded your current quota/i.test(err.message)) {
           try {
             const { modelDiscoveryService } = require('../services/modelDiscovery');
             modelDiscoveryService.autoUpdateToBestModel().catch(console.error);

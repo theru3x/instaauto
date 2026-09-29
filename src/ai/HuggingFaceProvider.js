@@ -47,8 +47,13 @@ Rules:
 
     const userPrompt = `Comment: "${input.comment_text}". Output JSON:`;
 
-    // Hugging Face router / inference endpoint
-    const url = `https://api-inference.huggingface.co/models/${this.model}/v1/chat/completions`;
+    // Modern Hugging Face Inference Router endpoint (OpenAI compatible)
+    const endpoints = [
+      'https://router.huggingface.co/hf-inference/v1/chat/completions',
+      `https://api-inference.huggingface.co/models/${this.model}/v1/chat/completions`,
+      `https://api-inference.huggingface.co/models/${this.model}`
+    ];
+    const url = endpoints[0];
     const payload = {
       model: this.model,
       messages: [
