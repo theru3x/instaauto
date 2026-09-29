@@ -1,0 +1,63 @@
+const express = require('express');
+const cors = require('cors');
+const config = require('./config/env');
+const healthRouter = require('./routes/health');
+const webhookRouter = require('./routes/webhook');
+const apiRouter = require('./routes/api');
+
+const app = express();
+
+// Enable CORS for frontend
+app.use(cors());
+
+// Parse JSON body while capturing rawBody for webhook HMAC verification
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+app.use(express.urlencoded({ extended: true }));
+
+// Routes
+app.use('/health', healthRouter);
+app.use('/webhook', webhookRouter);
+app.use('/api', apiRouter);
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Instagram Comment-to-DM Automation Server',
+    status: 'running',
+    version: '2.0.0',
+    endpoints: {
+      health: '/health',
+      webhook: '/webhook',
+      api: '/api'
+    }
+  });
+});
+
+// Start server if executed directly
+if (require.main === module) {
+  const PORT = config.port;
+  const server = app.listen(PORT, () => {
+    console.log(`[Server] Instagram Automation Server listening on port ${PORT}`);
+    console.log(`[Server] Environment: ${config.env}`);
+    console.log(`[Server] Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log(`[Server] Health Check: http://localhost:${PORT}/health`);
+  });
+
+  // Graceful shutdown
+  const shutdown = () => {
+    console.log('[Server] Gracefully shutting down...');
+    server.close(() => {
+      console.log('[Server] Closed all connections.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+module.exports = app;

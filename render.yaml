@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: instagram-comment-dm-automation
+    env: node
+    plan: starter # Recommended starter plan for 24/7 background worker without spin-downs
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_MODEL
+        value: meta-llama/Llama-3.2-3B-Instruct
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: FALLBACK_MESSAGE
+        value: "Hey 👋 Thanks for your comment! You can find the requested information here: https://theru3x.com/links"
+      - key: ALLOWED_URL
+        value: "https://theru3x.com/links"
+      - key: AI_TIMEOUT_MS
+        value: "10000"
+      - key: AI_MAX_RETRIES
+        value: "3"
+      - key: AI_BACKOFF_BASE_MS
+        value: "1000"
+      - key: CIRCUIT_BREAKER_THRESHOLD
+        value: "3"
+      - key: CIRCUIT_BREAKER_RESET_TIMEOUT_MS
+        value: "60000"
+      - key: MONGODB_URI
+        sync: false
+
