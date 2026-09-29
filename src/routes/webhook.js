@@ -58,6 +58,7 @@ router.post('/', async (req, res) => {
   }
 
   const body = req.body;
+  console.info(`[Webhook] Received POST event: object=${body?.object}, entries=${body?.entry?.length || 0}`);
 
   // 2. Validate object type
   if (body.object === 'instagram' || body.object === 'page') {
