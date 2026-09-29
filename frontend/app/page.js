@@ -31,7 +31,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('logs'); // 'logs' | 'models' | 'errors' | 'rules' | 'playground' | 'settings'
